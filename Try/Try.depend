@@ -1,0 +1,8 @@
+# depslib dependency file v1.0
+1733853456 source:e:\ds blockchain project\try\main.cpp
+	<iostream>
+	<vector>
+	<sstream>
+	<ctime>
+	<functional>
+
