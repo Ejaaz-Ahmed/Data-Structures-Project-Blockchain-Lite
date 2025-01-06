@@ -41,56 +41,6 @@ public:
     }
 };
 
-class Blockchain {
-private:
-    vector<Block> chain;
-
-public:
-    // Constructor to initialize the blockchain with a genesis block
-    Blockchain() {
-        chain.push_back(createGenesisBlock());
-    }
-
-    // Create the genesis block
-    Block createGenesisBlock() {
-        return Block(0, "Genesis Block", "0");
-    }
-
-    // Get the latest block in the chain
-    Block getLatestBlock() const {
-        return chain.back();
-    }
-
-    // Add a new block to the chain
-    void addBlock(const string &data) {
-        Block newBlock(chain.size(), data, getLatestBlock().hash);
-        chain.push_back(newBlock);
-    }
-
-    // Validate the blockchain
-    bool isChainValid() const {
-        for (size_t i = 1; i < chain.size(); ++i) {
-            Block currentBlock = chain[i];
-            Block previousBlock = chain[i - 1];
-
-            // Check if the current block's hash is correct
-            if (currentBlock.hash != currentBlock.calculateHash()) {
-                return false;
-            }
-
-            // Check if the current block's previous hash matches the previous block's hash
-            if (currentBlock.previousHash != previousBlock.hash) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // Get the entire blockchain
-    vector<Block> getChain() const {
-        return chain;
-    }
-};
 
 int main() {
     Blockchain blockchain;
