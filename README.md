@@ -12,4 +12,5 @@ In the master branch we have 4 versions of blockchain.
 - In version 2, we have implemented the colors for the better user interface.
 - In version 3, we have implemented the modifying block and public key.
 - In version 3, Allows viewing any block by its index.
-- 
+- In version 3, Instead of modifying the original block (which would break the chain), it
+Creates a new block containing the modification
