@@ -134,6 +134,36 @@ public:
             current = current->next;
         }
     }
+    Block* getBlockAtIndex(int index) const {
+        if (index < 0 || index >= size) return nullptr;
+        
+        Block* current = head;
+        int currentIndex = 0;
+        
+        while (current != nullptr && currentIndex < index) {
+            current = current->next;
+            currentIndex++;
+        }
+        
+        return current;
+    }
+
+    // Create a new block as a modification of an existing block
+    void modifyBlockAsNew(int targetIndex, const string& newData) {
+        Block* targetBlock = getBlockAtIndex(targetIndex);
+        if (!targetBlock) {
+            cout << "Block not found!" << endl;
+            return;
+        }
+
+        // Create modification record
+        stringstream ss;
+        ss << "MODIFIED BLOCK " << targetIndex << ": " << newData 
+           << " (Original data: " << targetBlock->data << ")";
+        
+        // Add as a new block
+        addBlock(ss.str());
+    }
 };
 
 // Display functions remain the same
@@ -171,17 +201,21 @@ string getInput(const string& prompt) {
 
 int main() {
     Blockchain blockchain;
+    displayMenu();
 
     while (true) {
-        displayMenu();
+        
 
         YELLOW_COLOR;
-        cout << "\n1. Add new transaction";
-        cout << "\n2. View blockchain";
-        cout << "\n3. Validate blockchain";
-        cout << "\n4. Exit";
+    cout << "\n1. Add new transaction";
+    cout << "\n2. View blockchain";
+    cout << "\n3. Validate blockchain";
+    cout << "\n4. View specific block";         // New option
+    cout << "\n5. Modify block (as new block)"; // New option
+    cout << "\n6. Exit";
+    RESET_COLOR;
 
-        string choice = getInput("\n\nEnter your choice (1-4): ");
+        string choice = getInput("\n\nEnter your choice (1-6): ");
 
         if (choice == "1") {
             string data = getInput("\nEnter transaction data: ");
@@ -212,7 +246,52 @@ int main() {
             cout << "\nPress Enter to continue...";
             cin.get();
         }
-        else if (choice == "4") {
+        if (choice == "4") {
+            string indexStr = getInput("\nEnter block index to view: ");
+            try {
+                int index = stoi(indexStr);
+                Block* block = blockchain.getBlockAtIndex(index);
+                if (block) {
+                    displayBlock(*block);
+                } else {
+                    RED_COLOR;
+                    cout << "\nBlock not found at index " << index << endl;
+                    RESET_COLOR;
+                }
+            } catch (const std::invalid_argument&) {
+                RED_COLOR;
+                cout << "\nInvalid index format!" << endl;
+                RESET_COLOR;
+            }
+            cout << "\nPress Enter to continue...";
+            cin.get();
+        }
+        else if (choice == "5") {
+            string indexStr = getInput("\nEnter block index to modify: ");
+            try {
+                int index = stoi(indexStr);
+                Block* block = blockchain.getBlockAtIndex(index);
+                if (block) {
+                    cout << "\nCurrent block data: " << block->data << endl;
+                    string newData = getInput("\nEnter new data: ");
+                    blockchain.modifyBlockAsNew(index, newData);
+                    GREEN_COLOR;
+                    cout << "\n => Modification added as new block!\n";
+                    RESET_COLOR;
+                } else {
+                    RED_COLOR;
+                    cout << "\nBlock not found at index " << index << endl;
+                    RESET_COLOR;
+                }
+            } catch (const std::invalid_argument&) {
+                RED_COLOR;
+                cout << "\nInvalid index format!" << endl;
+                RESET_COLOR;
+            }
+            cout << "\nPress Enter to continue...";
+            cin.get();
+        }
+        else if (choice == "6") {
             PURPLE_COLOR;
             cout << "\nThank you for using Blockchain Simulator! Goodbye!\n\n";
             RESET_COLOR;
