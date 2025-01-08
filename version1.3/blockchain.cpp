@@ -3,6 +3,12 @@
 #include <ctime>
 #include <functional>
 #include <iomanip>
+#include <string>
+#include <map>
+#include <random>
+#include <cstring>
+#include <chrono>
+#include <climits>
 #ifdef _WIN32
     #include <windows.h>
 #endif
@@ -28,28 +34,64 @@ using namespace std;
     #define PURPLE_COLOR SET_COLOR("\033[35m")
 #endif
 
-// Modified Block class to include next pointer
+// Transaction data structure using union instead of variant
+struct TransactionData {
+    union DataValue {
+        int intValue;
+        double doubleValue;
+        char stringValue[256];
+        
+        DataValue() {} // Default constructor
+    } value;
+    
+    string dataType;  // "int", "double", or "string"
+    string description;
+
+    // Helper method to get value as string for display and hashing
+    string getValueAsString() const {
+        stringstream ss;
+        if (dataType == "int")
+            ss << value.intValue;
+        else if (dataType == "double")
+            ss << value.doubleValue;
+        else if (dataType == "string")
+            ss << value.stringValue;
+        return ss.str();
+    }
+};
+
+// User identity structure
+struct UserIdentity {
+    string publicKey;
+    string username;
+    time_t createdAt;
+};
+
 class Block {
 public:
     int index;
     string previousHash;
     string hash;
-    string data;
+    TransactionData data;
     time_t timestamp;
-    Block* next;  // Added for linked list implementation
+    UserIdentity creator;
+    Block* next;
 
-    Block(int i, string d, string prehash) {
+    Block(int i, TransactionData d, string prehash, UserIdentity user) {
         index = i;
         data = d;
         previousHash = prehash;
         timestamp = time(NULL);
+        creator = user;
         hash = calculateHash();
-        next = nullptr;  // Initialize next pointer
+        next = nullptr;
     }
 
     string calculateHash() const {
         stringstream ss;
-        ss << index << timestamp << previousHash << data;
+        ss << index << timestamp << previousHash;
+        ss << data.getValueAsString();
+        ss << data.description << creator.publicKey;
         return simpleHash(ss.str());
     }
 
@@ -64,25 +106,67 @@ public:
 
 class Blockchain {
 private:
-    Block* head;  // Head of the linked list
-    int size;     // Keep track of the chain size
+    Block* head;
+    int size;
+    map<string, UserIdentity> users;
 
 public:
     Blockchain() {
         head = nullptr;
         size = 0;
-        // Create genesis block
-        addBlock("Genesis Block");
+        // Create genesis block with system user
+        UserIdentity systemUser = {"SYSTEM", "SYSTEM", time(NULL)};
+        TransactionData genesisData;
+        genesisData.dataType = "string";
+        strncpy(genesisData.value.stringValue, "Genesis Block", 255);
+        genesisData.description = "System Generated";
+        addBlock(genesisData, systemUser);
     }
 
     ~Blockchain() {
-        // Cleanup linked list
         Block* current = head;
         while (current != nullptr) {
             Block* next = current->next;
             delete current;
             current = next;
         }
+    }
+
+    string generatePublicKey(const string& username) {
+    random_device rd;
+    mt19937_64 gen(rd() ^ (
+        static_cast<unsigned long long>(chrono::high_resolution_clock::now()
+            .time_since_epoch()
+            .count()) + 
+        hash<string>{}(username)
+    ));
+    
+    uniform_int_distribution<unsigned long long> dis(0, ULLONG_MAX);
+    
+    stringstream ss;
+    ss << username << "-";
+    
+    // Generate a longer hex string
+    unsigned long long random_value = dis(gen);
+    ss << hex << setfill('0') << setw(16) << random_value;
+    
+    // Add timestamp component
+    ss << "-" << hex << chrono::system_clock::now().time_since_epoch().count() % 10000;
+    
+    return ss.str();
+    }
+
+    UserIdentity registerUser(const string& username) {
+        UserIdentity newUser;
+        newUser.username = username;
+        newUser.publicKey = generatePublicKey(username);
+        newUser.createdAt = time(NULL);
+        users[newUser.publicKey] = newUser;
+        return newUser;
+    }
+
+    bool verifyUser(const string& publicKey) {
+        return users.find(publicKey) != users.end();
     }
 
     Block* getLatestBlock() const {
@@ -94,10 +178,10 @@ public:
         return current;
     }
 
-    void addBlock(const string &data) {
+    void addBlock(const TransactionData& data, const UserIdentity& creator) {
         Block* latestBlock = getLatestBlock();
         string prevHash = latestBlock ? latestBlock->hash : "0";
-        Block* newBlock = new Block(size, data, prevHash);
+        Block* newBlock = new Block(size, data, prevHash, creator);
 
         if (!head) {
             head = newBlock;
@@ -126,7 +210,6 @@ public:
         return true;
     }
 
-    // Iterator function to simulate vector-like access
     void forEach(function<void(const Block&)> callback) const {
         Block* current = head;
         while (current != nullptr) {
@@ -134,22 +217,26 @@ public:
             current = current->next;
         }
     }
+
     Block* getBlockAtIndex(int index) const {
         if (index < 0 || index >= size) return nullptr;
-        
         Block* current = head;
         int currentIndex = 0;
-        
         while (current != nullptr && currentIndex < index) {
             current = current->next;
             currentIndex++;
         }
-        
         return current;
     }
 
-    // Create a new block as a modification of an existing block
-    void modifyBlockAsNew(int targetIndex, const string& newData) {
+    UserIdentity getUserByPublicKey(const string& publicKey) const {
+        auto it = users.find(publicKey);
+        if (it != users.end()) {
+            return it->second;
+        }
+        return {"", "", 0}; // Return empty user if not found
+    }
+    void modifyBlockAsNew(int targetIndex, const TransactionData& newData, const UserIdentity& modifier) {
         Block* targetBlock = getBlockAtIndex(targetIndex);
         if (!targetBlock) {
             cout << "Block not found!" << endl;
@@ -157,36 +244,45 @@ public:
         }
 
         // Create modification record
-        stringstream ss;
-        ss << "MODIFIED BLOCK " << targetIndex << ": " << newData 
-           << " (Original data: " << targetBlock->data << ")";
+        TransactionData modData;
+        modData.dataType = "string";
+        string modificationRecord = "MODIFIED BLOCK " + to_string(targetIndex) + ": ";
+        modificationRecord += "New Value: " + newData.getValueAsString();
+        modificationRecord += " (Original: " + targetBlock->data.getValueAsString() + ")";
         
+        strncpy(modData.value.stringValue, modificationRecord.c_str(), 255);
+        modData.value.stringValue[255] = '\0';  // Ensure null termination
+        modData.description = "Modification by " + modifier.username;
+
         // Add as a new block
-        addBlock(ss.str());
+        addBlock(modData, modifier);
     }
 };
-
-// Display functions remain the same
-void displayMenu() {
-    system("cls||clear");
-    PURPLE_COLOR;
-    cout << "\n---------------------------------------------------\n";
-    cout << "     |       BLOCKCHAIN SIMULATOR               |";
-    cout << "\n---------------------------------------------------\n";
-    RESET_COLOR;
-}
 
 void displayBlock(const Block& block) {
     BLUE_COLOR;
     cout << "\n--------------------Block #" << block.index << "--------------------\n";
     YELLOW_COLOR;
-    cout << "| Data: " << block.data << endl;
+    cout << "| Creator: " << block.creator.username << endl;
+    cout << "| Public Key: " << block.creator.publicKey << endl;
     GREEN_COLOR;
+    cout << "| Data Type: " << block.data.dataType << endl;
+    cout << "| Description: " << block.data.description << endl;
+    cout << "| Value: " << block.data.getValueAsString() << endl;
     cout << "| Timestamp: " << put_time(localtime(&block.timestamp), "%Y-%m-%d %H:%M:%S") << endl;
     BLUE_COLOR;
     cout << "| Previous Hash: " << block.previousHash.substr(0, 20) << "..." << endl;
     cout << "| Current Hash:  " << block.hash.substr(0, 20) << "..." << endl;
     cout << "------------------------------------------------\n";
+    RESET_COLOR;
+}
+
+void displayMenu() {
+    system("cls||clear");
+    PURPLE_COLOR;
+    cout << "\n---------------------------------------------------\n";
+    cout << "  |               BLOCKCHAIN SIMULATOR        |";
+    cout << "\n---------------------------------------------------\n";
     RESET_COLOR;
 }
 
@@ -201,40 +297,109 @@ string getInput(const string& prompt) {
 
 int main() {
     Blockchain blockchain;
+    UserIdentity currentUser{"", "", 0};
     displayMenu();
 
     while (true) {
-        
+        GREEN_COLOR;
+        cout << "\n1. Register new user";
+        cout << "\n2. Login with public key";
+        cout << "\n3. Add new transaction";
+        cout << "\n4. View blockchain";
+        cout << "\n5. Validate blockchain";
+        cout << "\n6. View specific block";
+        cout << "\n7. Modify block";  // Added option
+        cout << "\n8. Exit";          // Changed to 8
+        RESET_COLOR;
 
-        YELLOW_COLOR;
-    cout << "\n1. Add new transaction";
-    cout << "\n2. View blockchain";
-    cout << "\n3. Validate blockchain";
-    cout << "\n4. View specific block";         // New option
-    cout << "\n5. Modify block (as new block)"; // New option
-    cout << "\n6. Exit";
-    RESET_COLOR;
-
-        string choice = getInput("\n\nEnter your choice (1-6): ");
+        string choice = getInput("\n\nEnter your choice (1-8): ");
 
         if (choice == "1") {
-            string data = getInput("\nEnter transaction data: ");
-            blockchain.addBlock(data);
+            string username = getInput("\nEnter username: ");
+            UserIdentity newUser = blockchain.registerUser(username);
+            GREEN_COLOR;
+            cout << "\n => User registered successfully!";
+            cout << "\n => Your public key is: " << newUser.publicKey << endl;
+            cout << "\n => Please save this key for future login!" << endl;
+            RESET_COLOR;
+        }
+        else if (choice == "2") {
+            string publicKey = getInput("\nEnter your public key: ");
+            if (blockchain.verifyUser(publicKey)) {
+                currentUser = blockchain.getUserByPublicKey(publicKey);
+                GREEN_COLOR;
+                cout << "\n => Login successful! Welcome " << currentUser.username << "!" << endl;
+                RESET_COLOR;
+            } else {
+                RED_COLOR;
+                cout << "\n => Invalid public key!" << endl;
+                RESET_COLOR;
+            }
+        }
+        else if (choice == "3") {
+            if (currentUser.publicKey.empty()) {
+                RED_COLOR;
+                cout << "\n => Please login first!" << endl;
+                RESET_COLOR;
+                continue;
+            }
+
+            cout << "\nSelect data type to add in Transaction:";
+            cout << "\n1. Numeric (Integer)";
+            cout << "\n2. Decimal (Double)";
+            cout << "\n3. Alphabetic (String)\n";
+            string typeChoice = getInput("Enter choice (1-3): ");
+
+            TransactionData tData;
+            tData.description = getInput("Enter description: ");
+
+            if (typeChoice == "1") {
+                tData.dataType = "int";
+                try {
+                    tData.value.intValue = stoi(getInput("Enter integer value: "));
+                } catch (...) {
+                    RED_COLOR;
+                    cout << "\nInvalid integer!" << endl;
+                    RESET_COLOR;
+                    continue;
+                }
+            }
+            else if (typeChoice == "2") {
+                tData.dataType = "double";
+                try {
+                    tData.value.doubleValue = stod(getInput("Enter double value: "));
+                } catch (...) {
+                    RED_COLOR;
+                    cout << "\nInvalid double!" << endl;
+                    RESET_COLOR;
+                    continue;
+                }
+            }
+            else if (typeChoice == "3") {
+                tData.dataType = "string";
+                string strValue = getInput("Enter string value: ");
+                strncpy(tData.value.stringValue, strValue.c_str(), 255);
+                tData.value.stringValue[255] = '\0';  // Ensure null termination
+            }
+            else {
+                RED_COLOR;
+                cout << "\nInvalid choice!" << endl;
+                RESET_COLOR;
+                continue;
+            }
+
+            blockchain.addBlock(tData, currentUser);
             GREEN_COLOR;
             cout << "\n => Transaction added successfully!\n";
             RESET_COLOR;
-            cout << "\nPress Enter to continue...";
-            cin.get();
         }
-        else if (choice == "2") {
+        else if (choice == "4") {
             cout << "\nCurrent Blockchain State:\n";
             blockchain.forEach([](const Block& block) {
                 displayBlock(block);
             });
-            cout << "\nPress Enter to continue...";
-            cin.get();
         }
-        else if (choice == "3") {
+        else if (choice == "5") {
             if (blockchain.isChainValid()) {
                 GREEN_COLOR;
                 cout << "\n=> Blockchain is valid and secure!\n";
@@ -243,10 +408,8 @@ int main() {
                 cout << "\n => WARNING: Blockchain has been tampered with!\n";
             }
             RESET_COLOR;
-            cout << "\nPress Enter to continue...";
-            cin.get();
         }
-        if (choice == "4") {
+        else if (choice == "6") {
             string indexStr = getInput("\nEnter block index to view: ");
             try {
                 int index = stoi(indexStr);
@@ -258,23 +421,72 @@ int main() {
                     cout << "\nBlock not found at index " << index << endl;
                     RESET_COLOR;
                 }
-            } catch (const std::invalid_argument&) {
+            } catch (...) {
                 RED_COLOR;
                 cout << "\nInvalid index format!" << endl;
                 RESET_COLOR;
             }
-            cout << "\nPress Enter to continue...";
-            cin.get();
         }
-        else if (choice == "5") {
+        else if (choice == "7") {
+            if (currentUser.publicKey.empty()) {
+                RED_COLOR;
+                cout << "\n => Please login first!" << endl;
+                RESET_COLOR;
+                continue;
+            }
+
             string indexStr = getInput("\nEnter block index to modify: ");
             try {
                 int index = stoi(indexStr);
                 Block* block = blockchain.getBlockAtIndex(index);
                 if (block) {
-                    cout << "\nCurrent block data: " << block->data << endl;
-                    string newData = getInput("\nEnter new data: ");
-                    blockchain.modifyBlockAsNew(index, newData);
+                    cout << "\nCurrent block data: " << block->data.getValueAsString() << endl;
+                    
+                    TransactionData newData;
+                    cout << "\nSelect new data type:";
+                    cout << "\n1. Integer";
+                    cout << "\n2. Double";
+                    cout << "\n3. String\n";
+                    string typeChoice = getInput("Enter choice (1-3): ");
+
+                    newData.description = getInput("Enter new description: ");
+
+                    if (typeChoice == "1") {
+                        newData.dataType = "int";
+                        try {
+                            newData.value.intValue = stoi(getInput("Enter integer value: "));
+                        } catch (...) {
+                            RED_COLOR;
+                            cout << "\nInvalid integer!" << endl;
+                            RESET_COLOR;
+                            continue;
+                        }
+                    }
+                    else if (typeChoice == "2") {
+                        newData.dataType = "double";
+                        try {
+                            newData.value.doubleValue = stod(getInput("Enter double value: "));
+                        } catch (...) {
+                            RED_COLOR;
+                            cout << "\nInvalid double!" << endl;
+                            RESET_COLOR;
+                            continue;
+                        }
+                    }
+                    else if (typeChoice == "3") {
+                        newData.dataType = "string";
+                        string strValue = getInput("Enter string value: ");
+                        strncpy(newData.value.stringValue, strValue.c_str(), 255);
+                        newData.value.stringValue[255] = '\0';
+                    }
+                    else {
+                        RED_COLOR;
+                        cout << "\nInvalid choice!" << endl;
+                        RESET_COLOR;
+                        continue;
+                    }
+
+                    blockchain.modifyBlockAsNew(index, newData, currentUser);
                     GREEN_COLOR;
                     cout << "\n => Modification added as new block!\n";
                     RESET_COLOR;
@@ -283,26 +495,26 @@ int main() {
                     cout << "\nBlock not found at index " << index << endl;
                     RESET_COLOR;
                 }
-            } catch (const std::invalid_argument&) {
+            } catch (...) {
                 RED_COLOR;
                 cout << "\nInvalid index format!" << endl;
                 RESET_COLOR;
             }
-            cout << "\nPress Enter to continue...";
-            cin.get();
         }
-        else if (choice == "6") {
+        else if (choice == "8") { 
             PURPLE_COLOR;
-            cout << "\nThank you for using Blockchain Simulator! Goodbye!\n\n";
+            cout << "\nThank you for using Enhanced Blockchain Simulator! Goodbye!\n\n";
             RESET_COLOR;
             break;
         }
         else {
             RED_COLOR;
-            cout << "\nInvalid choice! Press Enter to try again...";
+            cout << "\nInvalid choice! Please try again...";
             RESET_COLOR;
-            cin.get();
         }
+
+        cout << "\nPress Enter to continue...";
+        cin.get();
     }
     return 0;
 }
