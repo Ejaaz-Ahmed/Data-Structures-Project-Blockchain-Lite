@@ -62,9 +62,10 @@ struct TransactionData {
 
 // User identity structure
 struct UserIdentity {
-    string publicKey;
-    string username;
-    time_t createdAt;
+    string publicKey = "";
+    string privateKey = "";
+    string username = "";
+    time_t createdAt = 0;
 };
 
 class Block {
@@ -78,14 +79,20 @@ public:
     Block* next;
 
     Block(int i, TransactionData d, string prehash, UserIdentity user) {
-        index = i;
-        data = d;
-        previousHash = prehash;
-        timestamp = time(NULL);
-        creator = user;
-        hash = calculateHash();
-        next = nullptr;
-    }
+    index = i;
+    data = d;
+    previousHash = prehash;
+    timestamp = time(NULL);
+    creator = user;
+    hash = calculateHash();
+    next = nullptr;
+    
+    // Add these initializations
+    creator.publicKey = user.publicKey;
+    creator.privateKey = user.privateKey;
+    creator.username = user.username;
+    creator.createdAt = user.createdAt;
+} 
 
     string calculateHash() const {
         stringstream ss;
@@ -115,7 +122,7 @@ public:
         head = nullptr;
         size = 0;
         // Create genesis block with system user
-        UserIdentity systemUser = {"SYSTEM", "SYSTEM", time(NULL)};
+        UserIdentity systemUser = {"SYSTEM", "SYSTEM", "system", time(NULL)};
         TransactionData genesisData;
         genesisData.dataType = "string";
         strncpy(genesisData.value.stringValue, "Genesis Block", 255);
@@ -131,43 +138,31 @@ public:
             current = next;
         }
     }
-
+    string generatePrivateKey() {
+    static random_device rd;  // Add static
+    static mt19937 gen(rd() + chrono::high_resolution_clock::now().time_since_epoch().count());  // Add static and time-based seed
+    uniform_int_distribution<int> dis(1000, 9999);
+    return to_string(dis(gen));
+}
     string generatePublicKey(const string& username) {
-    random_device rd;
-    mt19937_64 gen(rd() ^ (
-        static_cast<unsigned long long>(chrono::high_resolution_clock::now()
-            .time_since_epoch()
-            .count()) + 
-        hash<string>{}(username)
-    ));
-    
-    uniform_int_distribution<unsigned long long> dis(0, ULLONG_MAX);
-    
     stringstream ss;
-    ss << username << "-";
-    
-    // Generate a longer hex string
-    unsigned long long random_value = dis(gen);
-    ss << hex << setfill('0') << setw(16) << random_value;
-    
-    // Add timestamp component
-    ss << "-" << hex << chrono::system_clock::now().time_since_epoch().count() % 10000;
-    
+    ss << username << "-" << chrono::system_clock::now().time_since_epoch().count() % 10000;
     return ss.str();
-    }
+}
 
     UserIdentity registerUser(const string& username) {
-        UserIdentity newUser;
-        newUser.username = username;
-        newUser.publicKey = generatePublicKey(username);
-        newUser.createdAt = time(NULL);
-        users[newUser.publicKey] = newUser;
-        return newUser;
-    }
+    UserIdentity newUser;
+    newUser.username = username;
+    newUser.publicKey = generatePublicKey(username);
+    newUser.privateKey = generatePrivateKey();
+    newUser.createdAt = time(NULL);
+    users[newUser.privateKey] = newUser;  // Store by private key
+    return newUser;
+}
 
-    bool verifyUser(const string& publicKey) {
-        return users.find(publicKey) != users.end();
-    }
+    bool verifyUser(const string& privateKey) {
+    return users.find(privateKey) != users.end();
+}
 
     Block* getLatestBlock() const {
         if (!head) return nullptr;
@@ -229,13 +224,13 @@ public:
         return current;
     }
 
-    UserIdentity getUserByPublicKey(const string& publicKey) const {
-        auto it = users.find(publicKey);
-        if (it != users.end()) {
-            return it->second;
-        }
-        return {"", "", 0}; // Return empty user if not found
+    UserIdentity getUserByPrivateKey(const string& privateKey) const {
+    auto it = users.find(privateKey);
+    if (it != users.end()) {
+        return it->second;
     }
+    return UserIdentity{"", "", "", 0};  // Add empty strings for all string members
+}
     void modifyBlockAsNew(int targetIndex, const TransactionData& newData, const UserIdentity& modifier) {
         Block* targetBlock = getBlockAtIndex(targetIndex);
         if (!targetBlock) {
@@ -297,13 +292,13 @@ string getInput(const string& prompt) {
 
 int main() {
     Blockchain blockchain;
-    UserIdentity currentUser{"", "", 0};
+    UserIdentity currentUser; 
     displayMenu();
 
     while (true) {
         GREEN_COLOR;
         cout << "\n1. Register new user";
-        cout << "\n2. Login with public key";
+        cout << "\n2. Login with private key";
         cout << "\n3. Add new transaction";
         cout << "\n4. View blockchain";
         cout << "\n5. Validate blockchain";
@@ -319,20 +314,21 @@ int main() {
             UserIdentity newUser = blockchain.registerUser(username);
             GREEN_COLOR;
             cout << "\n => User registered successfully!";
-            cout << "\n => Your public key is: " << newUser.publicKey << endl;
+            cout << "\n => Your public key is: " << newUser.publicKey;
+            cout << "\n => Your private key for login is: " << newUser.privateKey;
             cout << "\n => Please save this key for future login!" << endl;
             RESET_COLOR;
         }
         else if (choice == "2") {
-            string publicKey = getInput("\nEnter your public key: ");
-            if (blockchain.verifyUser(publicKey)) {
-                currentUser = blockchain.getUserByPublicKey(publicKey);
+            string privateKey = getInput("\nEnter your private key: ");
+if (blockchain.verifyUser(privateKey)) {
+    currentUser = blockchain.getUserByPrivateKey(privateKey);
                 GREEN_COLOR;
                 cout << "\n => Login successful! Welcome " << currentUser.username << "!" << endl;
                 RESET_COLOR;
             } else {
                 RED_COLOR;
-                cout << "\n => Invalid public key!" << endl;
+                cout << "\n => Invalid private key!" << endl;
                 RESET_COLOR;
             }
         }
