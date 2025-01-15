@@ -14,7 +14,6 @@
 #endif
 using namespace std;
 
-// Color codes remain the same
 #ifdef _WIN32
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     #define SET_COLOR(color) SetConsoleTextAttribute(hConsole, color)
@@ -34,7 +33,7 @@ using namespace std;
     #define PURPLE_COLOR SET_COLOR("\033[35m")
 #endif
 
-// Transaction data structure using union instead of variant
+// Transaction data structure using union 
 struct TransactionData {
     union DataValue {
         int intValue;
